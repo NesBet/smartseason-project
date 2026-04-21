@@ -1,12 +1,14 @@
-FROM node:lts-alpine
+FROM node:20-alpine
 
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install
+
+RUN npm install --legacy-peer-deps
 
 COPY . .
-RUN npm run build
 
-EXPOSE 4173
-CMD ["npm", "run", "preview"]
+RUN chmod -R +x node_modules/.bin/
+
+EXPOSE 5173
+CMD ["npx", "vite", "--host", "--port", "5173"]
