@@ -41,7 +41,9 @@ const withStatus = (rows) =>
 app.post("/api/login", async (req, res) => {
   try {
     const { email, password } = req.body;
-    const result = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
+    const result = await pool.query("SELECT * FROM users WHERE email = $1", [
+      email,
+    ]);
     if (!result.rows.length)
       return res.status(404).json({ error: "User not found" });
     const user = result.rows[0];
@@ -52,9 +54,12 @@ app.post("/api/login", async (req, res) => {
     const token = jwt.sign(
       { id: user.id, email: user.email, role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: "8h" }
+      { expiresIn: "8h" },
     );
-    res.json({ token, user: { id: user.id, email: user.email, role: user.role } });
+    res.json({
+      token,
+      user: { id: user.id, email: user.email, role: user.role },
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -71,7 +76,7 @@ app.post("/api/signup", async (req, res) => {
     const hash = await bcrypt.hash(password, 10);
     const result = await pool.query(
       "INSERT INTO users (email, role, password_hash) VALUES ($1, $2, $3) RETURNING id, email, role",
-      [email, "Customer", hash]
+      [email, "Customer", hash],
     );
     res.status(201).json({ user: result.rows[0] });
   } catch (err) {
@@ -82,151 +87,242 @@ app.post("/api/signup", async (req, res) => {
 });
 
 // ── Admin: Fields ─────────────────────────────────────────────────
-app.get("/api/admin/fields", requireAuth, requireRole("Admin"), async (req, res) => {
-  try {
-    const result = await pool.query(fieldsQuery + " ORDER BY f.created_at DESC");
-    res.json(withStatus(result.rows));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+app.get(
+  "/api/admin/fields",
+  requireAuth,
+  requireRole("Admin"),
+  async (req, res) => {
+    try {
+      const result = await pool.query(
+        fieldsQuery + " ORDER BY f.created_at DESC",
+      );
+      res.json(withStatus(result.rows));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
-app.put("/api/admin/fields/:id", requireAuth, requireRole("Admin"), async (req, res) => {
-  try {
-    const { name, crop_type, current_stage, agent_id, customer_id } = req.body;
-    await pool.query(
-      `UPDATE fields
+app.put(
+  "/api/admin/fields/:id",
+  requireAuth,
+  requireRole("Admin"),
+  async (req, res) => {
+    try {
+      const { name, crop_type, current_stage, agent_id, customer_id } =
+        req.body;
+      await pool.query(
+        `UPDATE fields
        SET name=$1, crop_type=$2, current_stage=$3, agent_id=$4, customer_id=$5
        WHERE id=$6`,
-      [name, crop_type, current_stage, agent_id || null, customer_id || null, req.params.id]
-    );
-    res.json({ message: "Field updated." });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+        [
+          name,
+          crop_type,
+          current_stage,
+          agent_id || null,
+          customer_id || null,
+          req.params.id,
+        ],
+      );
+      res.json({ message: "Field updated." });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
-app.delete("/api/admin/fields/:id", requireAuth, requireRole("Admin"), async (req, res) => {
-  try {
-    await pool.query("DELETE FROM fields WHERE id=$1", [req.params.id]);
-    res.json({ message: "Field deleted." });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+app.delete(
+  "/api/admin/fields/:id",
+  requireAuth,
+  requireRole("Admin"),
+  async (req, res) => {
+    try {
+      await pool.query("DELETE FROM fields WHERE id=$1", [req.params.id]);
+      res.json({ message: "Field deleted." });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 // ── Admin: Users ─────────────────────────────────────────────────
-app.get("/api/admin/users", requireAuth, requireRole("Admin"), async (req, res) => {
-  try {
-    const result = await pool.query(
-      "SELECT id, email, role FROM users ORDER BY role, email"
-    );
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+app.get(
+  "/api/admin/users",
+  requireAuth,
+  requireRole("Admin"),
+  async (req, res) => {
+    try {
+      const result = await pool.query(
+        "SELECT id, email, role FROM users ORDER BY role, email",
+      );
+      res.json(result.rows);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
-app.put("/api/admin/users/:id", requireAuth, requireRole("Admin"), async (req, res) => {
-  try {
-    const { role } = req.body;
-    if (!["Admin", "Field Agent", "Customer"].includes(role))
-      return res.status(400).json({ error: "Invalid role." });
-    await pool.query("UPDATE users SET role=$1 WHERE id=$2", [role, req.params.id]);
-    res.json({ message: "Role updated." });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+app.put(
+  "/api/admin/users/:id",
+  requireAuth,
+  requireRole("Admin"),
+  async (req, res) => {
+    try {
+      const { role } = req.body;
+      if (!["Admin", "Field Agent", "Customer"].includes(role))
+        return res.status(400).json({ error: "Invalid role." });
+      await pool.query("UPDATE users SET role=$1 WHERE id=$2", [
+        role,
+        req.params.id,
+      ]);
+      res.json({ message: "Role updated." });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
-app.delete("/api/admin/users/:id", requireAuth, requireRole("Admin"), async (req, res) => {
-  try {
-    if (parseInt(req.params.id) === req.user.id)
-      return res.status(400).json({ error: "You cannot delete your own account." });
-    await pool.query("DELETE FROM users WHERE id=$1", [req.params.id]);
-    res.json({ message: "User deleted." });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+app.delete(
+  "/api/admin/users/:id",
+  requireAuth,
+  requireRole("Admin"),
+  async (req, res) => {
+    try {
+      if (parseInt(req.params.id) === req.user.id)
+        return res
+          .status(400)
+          .json({ error: "You cannot delete your own account." });
+      await pool.query("DELETE FROM users WHERE id=$1", [req.params.id]);
+      res.json({ message: "User deleted." });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 // ── Agent: Fields ─────────────────────────────────────────────────
-app.get("/api/agent/fields", requireAuth, requireRole("Field Agent"), async (req, res) => {
-  try {
-    const result = await pool.query(
-      fieldsQuery + " WHERE f.agent_id=$1 ORDER BY f.created_at DESC",
-      [req.user.id]
-    );
-    res.json(withStatus(result.rows));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post("/api/agent/fields", requireAuth, requireRole("Field Agent"), async (req, res) => {
-  try {
-    const { name, crop_type, planting_date, current_stage, customer_id } = req.body;
-    if (!name || !crop_type || !planting_date)
-      return res.status(400).json({ error: "Name, crop type, and planting date are required." });
-    const result = await pool.query(
-      `INSERT INTO fields (name, crop_type, planting_date, current_stage, agent_id, customer_id)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [name, crop_type, planting_date, current_stage || "Planted", req.user.id, customer_id || null]
-    );
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.put("/api/agent/fields/:id", requireAuth, requireRole("Field Agent"), async (req, res) => {
-  try {
-    const { name, crop_type, planting_date, current_stage, customer_id, notes } = req.body;
-    const check = await pool.query(
-      "SELECT id FROM fields WHERE id=$1 AND agent_id=$2",
-      [req.params.id, req.user.id]
-    );
-    if (!check.rows.length)
-      return res.status(403).json({ error: "You can only edit your own fields." });
-
-    await pool.query("BEGIN");
-    await pool.query(
-      `UPDATE fields SET name=$1, crop_type=$2, planting_date=$3,
-       current_stage=$4, customer_id=$5 WHERE id=$6`,
-      [name, crop_type, planting_date, current_stage, customer_id || null, req.params.id]
-    );
-    if (notes) {
-      await pool.query(
-        "INSERT INTO field_updates (field_id, agent_id, stage, notes) VALUES ($1,$2,$3,$4)",
-        [req.params.id, req.user.id, current_stage, notes]
+app.get(
+  "/api/agent/fields",
+  requireAuth,
+  requireRole("Field Agent"),
+  async (req, res) => {
+    try {
+      const result = await pool.query(
+        fieldsQuery + " WHERE f.agent_id=$1 ORDER BY f.created_at DESC",
+        [req.user.id],
       );
+      res.json(withStatus(result.rows));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
     }
-    await pool.query("COMMIT");
-    res.json({ message: "Field updated." });
-  } catch (err) {
-    await pool.query("ROLLBACK");
-    res.status(500).json({ error: err.message });
-  }
-});
+  },
+);
+
+app.post(
+  "/api/agent/fields",
+  requireAuth,
+  requireRole("Field Agent"),
+  async (req, res) => {
+    try {
+      const { name, crop_type, planting_date, current_stage, customer_id } =
+        req.body;
+      if (!name || !crop_type || !planting_date)
+        return res
+          .status(400)
+          .json({ error: "Name, crop type, and planting date are required." });
+      const result = await pool.query(
+        `INSERT INTO fields (name, crop_type, planting_date, current_stage, agent_id, customer_id)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+        [
+          name,
+          crop_type,
+          planting_date,
+          current_stage || "Planted",
+          req.user.id,
+          customer_id || null,
+        ],
+      );
+      res.status(201).json(result.rows[0]);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+app.put(
+  "/api/agent/fields/:id",
+  requireAuth,
+  requireRole("Field Agent"),
+  async (req, res) => {
+    try {
+      const {
+        name,
+        crop_type,
+        planting_date,
+        current_stage,
+        customer_id,
+        notes,
+      } = req.body;
+      const check = await pool.query(
+        "SELECT id FROM fields WHERE id=$1 AND agent_id=$2",
+        [req.params.id, req.user.id],
+      );
+      if (!check.rows.length)
+        return res
+          .status(403)
+          .json({ error: "You can only edit your own fields." });
+
+      await pool.query("BEGIN");
+      await pool.query(
+        `UPDATE fields SET name=$1, crop_type=$2, planting_date=$3,
+       current_stage=$4, customer_id=$5 WHERE id=$6`,
+        [
+          name,
+          crop_type,
+          planting_date,
+          current_stage,
+          customer_id || null,
+          req.params.id,
+        ],
+      );
+      if (notes) {
+        await pool.query(
+          "INSERT INTO field_updates (field_id, agent_id, stage, notes) VALUES ($1,$2,$3,$4)",
+          [req.params.id, req.user.id, current_stage, notes],
+        );
+      }
+      await pool.query("COMMIT");
+      res.json({ message: "Field updated." });
+    } catch (err) {
+      await pool.query("ROLLBACK");
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 // ── Customer: Fields ──────────────────────────────────────────────
-app.get("/api/customer/fields", requireAuth, requireRole("Customer"), async (req, res) => {
-  try {
-    const result = await pool.query(
-      fieldsQuery + " WHERE f.customer_id=$1 ORDER BY f.created_at DESC",
-      [req.user.id]
-    );
-    res.json(withStatus(result.rows));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+app.get(
+  "/api/customer/fields",
+  requireAuth,
+  requireRole("Customer"),
+  async (req, res) => {
+    try {
+      const result = await pool.query(
+        fieldsQuery + " WHERE f.customer_id=$1 ORDER BY f.created_at DESC",
+        [req.user.id],
+      );
+      res.json(withStatus(result.rows));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 // ── Shared: list customers (for agent dropdown) ───────────────────
 app.get("/api/customers", requireAuth, async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT id, email FROM users WHERE role='Customer' ORDER BY email"
+      "SELECT id, email FROM users WHERE role='Customer' ORDER BY email",
     );
     res.json(result.rows);
   } catch (err) {
@@ -238,7 +334,7 @@ app.get("/api/customers", requireAuth, async (req, res) => {
 app.get("/api/agents", requireAuth, requireRole("Admin"), async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT id, email FROM users WHERE role='Field Agent' ORDER BY email"
+      "SELECT id, email FROM users WHERE role='Field Agent' ORDER BY email",
     );
     res.json(result.rows);
   } catch (err) {
