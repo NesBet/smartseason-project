@@ -19,6 +19,22 @@ jobs:
           authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
           tags: tag:ci
 
+      - name: Verify Tailscale Connection
+        run: |
+          tailscale status
+          tailscale ip -4
+
+      - name: Wait for Tailscale
+        run: |
+          for i in {1..30}; do
+          if tailscale status --json > /dev/null 2>&1; then
+                  echo "Tailscale connected"
+                  break
+                fi
+                echo "Waiting for Tailscale... ($i/30)"
+                sleep 2
+              done
+
       - name: Deploy to server via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
