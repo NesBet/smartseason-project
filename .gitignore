@@ -25,3 +25,4 @@ dist-ssr
 *.sql
 .env
 seed-admin.js
+backup.dump
