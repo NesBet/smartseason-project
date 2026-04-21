@@ -1,14 +1,11 @@
 name: Deploy to Server
-
 on:
   push:
     branches:
       - main
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -23,8 +20,19 @@ jobs:
       - name: Wait for Tailscale to be ready
         run: sleep 10
 
-      - name: Check Tailscale can see server
-        run: tailscale ping ${{ secrets.SERVER_HOST }}
+      - name: Check Tailscale can reach server (DERP relay acceptable)
+        run: |
+          echo "Pinging server via Tailscale..."
+          # Run ping and capture output; exit 0 regardless of direct vs DERP
+          tailscale ping --c 3 ${{ secrets.SERVER_HOST }} || true
+
+          # Confirm reachability by checking for any successful pong
+          if tailscale ping --c 5 ${{ secrets.SERVER_HOST }} 2>&1 | grep -q "pong from"; then
+            echo "✅ Server is reachable via Tailscale (direct or DERP relay)"
+          else
+            echo "❌ Server is not reachable via Tailscale at all"
+            exit 1
+          fi
 
       - name: Deploy to server via SSH
         uses: appleboy/ssh-action@v1.0.3
