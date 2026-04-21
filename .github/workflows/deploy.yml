@@ -22,11 +22,6 @@ jobs:
 
       - name: Check Tailscale can reach server (DERP relay acceptable)
         run: |
-          echo "Pinging server via Tailscale..."
-          # Run ping and capture output; exit 0 regardless of direct vs DERP
-          tailscale ping --c 3 ${{ secrets.SERVER_HOST }} || true
-
-          # Confirm reachability by checking for any successful pong
           if tailscale ping --c 5 ${{ secrets.SERVER_HOST }} 2>&1 | grep -q "pong from"; then
             echo "✅ Server is reachable via Tailscale (direct or DERP relay)"
           else
@@ -34,18 +29,20 @@ jobs:
             exit 1
           fi
 
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+
       - name: Deploy to server via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          port: 22
-          timeout: 60s
-          command_timeout: 15m
-          debug: true
-          script: |
-            cd ${{ secrets.SERVER_PATH }}
-            git pull origin main
-            docker compose up -d --build
-            docker image prune -f
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              -o ConnectTimeout=60 \
+              ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} \
+              "cd ${{ secrets.SERVER_PATH }} && \
+               git pull origin main && \
+               docker compose up -d --build && \
+               docker image prune -f"
