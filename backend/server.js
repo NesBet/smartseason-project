@@ -12,7 +12,6 @@ app.use(express.json());
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-// ── SSE: per-user connection registry ────────────────────────────
 const sseClients = new Map();
 
 const sseAdd = (userId, res) => {
@@ -59,7 +58,7 @@ const recordFieldUpdate = async (fieldId, agentId, stage, notes) => {
   );
 };
 
-// ── Helpers ──────────────────────────────────────────────────────
+// Helpers
 const computeStatus = (field, lastUpdateDate) => {
   if (field.current_stage === "Harvested") return "Completed";
   const daysSinceUpdate = lastUpdateDate
@@ -84,7 +83,7 @@ const fieldsQuery = `
 const withStatus = (rows) =>
   rows.map((f) => ({ ...f, computed_status: computeStatus(f, f.last_update) }));
 
-// ── Auth ─────────────────────────────────────────────────────────
+// Auth
 app.post("/api/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -132,7 +131,7 @@ app.post("/api/signup", async (req, res) => {
   }
 });
 
-// ── SSE: client subscribes to events ─────────────────────────────────
+// client subscribes to events
 app.get("/api/events", (req, res) => {
   const token = req.query.token || req.headers.authorization?.split(" ")[1];
   if (!token) return res.status(401).end();
@@ -160,7 +159,7 @@ app.get("/api/events", (req, res) => {
   });
 });
 
-// ── Admin: Fields ─────────────────────────────────────────────────
+// Admin: Fields
 app.get(
   "/api/admin/fields",
   requireAuth,
@@ -205,7 +204,7 @@ app.put(
         ],
       );
 
-      // Record the update with notes (or default message)
+      // Record the update with notes
       const updateNotes = notes || `Field updated by Admin: ${name}`;
       await recordFieldUpdate(
         req.params.id,
@@ -255,7 +254,7 @@ app.delete(
   },
 );
 
-// ── Admin: Users ─────────────────────────────────────────────────
+// Admin: Users
 app.get(
   "/api/admin/users",
   requireAuth,
@@ -294,14 +293,14 @@ app.put(
       );
       const updated = result.rows[0];
 
-      // If role changed from Field Agent, unassign their fields
+      // If role changed from Field Agent
       if (oldRole === "Field Agent" && role !== "Field Agent") {
         await pool.query(
           "UPDATE fields SET agent_id = NULL WHERE agent_id = $1",
           [req.params.id],
         );
       }
-      // If role changed from Customer, unassign their fields
+      // If role changed from Customer
       if (oldRole === "Customer" && role !== "Customer") {
         await pool.query(
           "UPDATE fields SET customer_id = NULL WHERE customer_id = $1",
@@ -309,7 +308,7 @@ app.put(
         );
       }
 
-      // Mint a fresh token for the affected user
+      // Fresh token for the affected user
       const newToken = jwt.sign(
         { id: updated.id, email: updated.email, role: updated.role },
         process.env.JWT_SECRET,
@@ -376,7 +375,7 @@ app.delete(
   },
 );
 
-// ── Agent: Fields ─────────────────────────────────────────────────
+// Agent: Fields
 app.get(
   "/api/agent/fields",
   requireAuth,
@@ -502,7 +501,7 @@ app.put(
   },
 );
 
-// ── Customer: Fields ──────────────────────────────────────────────
+// Customer: Fields
 app.get(
   "/api/customer/fields",
   requireAuth,
@@ -520,7 +519,7 @@ app.get(
   },
 );
 
-// ── Shared: list customers (for agent dropdown) ───────────────────
+// list customers (for agent dropdown) ───────────────────
 app.get("/api/customers", requireAuth, async (req, res) => {
   try {
     const result = await pool.query(
@@ -532,7 +531,7 @@ app.get("/api/customers", requireAuth, async (req, res) => {
   }
 });
 
-// ── Shared: list agents (for admin reassign dropdown) ─────────────
+// list agents (for admin reassign dropdown)
 app.get("/api/agents", requireAuth, requireRole("Admin"), async (req, res) => {
   try {
     const result = await pool.query(

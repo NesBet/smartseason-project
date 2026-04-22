@@ -1,4 +1,4 @@
-// Dashboard.jsx – with red sign‑out button
+// Dashboard.jsx – pagination above the table
 import { useState, useEffect, useRef } from "react";
 import api from "./api";
 import ThemeToggle from "./ThemeToggle";
@@ -376,6 +376,74 @@ function FieldModal({ field, onSave, onClose, customers, agents, isAdmin }) {
   );
 }
 
+// ── Pagination component ─────────────────────────────────────────
+function Pagination({
+  currentPage,
+  totalPages,
+  onPageChange,
+  itemsPerPage,
+  onItemsPerPageChange,
+}) {
+  const pageNumbers = [];
+  const maxVisible = 5;
+  let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+  let endPage = Math.min(totalPages, startPage + maxVisible - 1);
+  if (endPage - startPage + 1 < maxVisible) {
+    startPage = Math.max(1, endPage - maxVisible + 1);
+  }
+  for (let i = startPage; i <= endPage; i++) {
+    pageNumbers.push(i);
+  }
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+        <span>Rows per page:</span>
+        <select
+          value={itemsPerPage}
+          onChange={(e) => onItemsPerPageChange(Number(e.target.value))}
+          className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+        >
+          {[5, 10, 25, 50].map((size) => (
+            <option key={size} value={size}>
+              {size}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => onPageChange(currentPage - 1)}
+          disabled={currentPage === 1}
+          className="px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition"
+        >
+          Previous
+        </button>
+        {pageNumbers.map((num) => (
+          <button
+            key={num}
+            onClick={() => onPageChange(num)}
+            className={`px-3 py-1.5 text-sm font-medium rounded-lg transition ${
+              num === currentPage
+                ? "bg-teal-500 text-white"
+                : "text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
+            }`}
+          >
+            {num}
+          </button>
+        ))}
+        <button
+          onClick={() => onPageChange(currentPage + 1)}
+          disabled={currentPage === totalPages}
+          className="px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition"
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Dashboard ───────────────────────────────────────────────
 export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
   const [tab, setTab] = useState("fields");
@@ -395,6 +463,10 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
   // Users tab search & role filter
   const [userSearch, setUserSearch] = useState("");
   const [userRoleFilter, setUserRoleFilter] = useState("all");
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
 
   const isAdmin = user.role === "Admin";
   const isAgent = user.role === "Field Agent";
@@ -515,6 +587,7 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
   const handleCreateField = async (form) => {
     await api.post("/api/agent/fields", form);
     await refreshFields();
+    setCurrentPage(1);
   };
   const handleUpdateField = async (id, form) => {
     await api.put(
@@ -527,6 +600,13 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
     await api.delete(`/api/admin/fields/${id}`);
     await refreshFields();
     setConfirmDelete(null);
+    const newTotal = filteredFields.length - 1;
+    const newTotalPages = Math.ceil(newTotal / itemsPerPage);
+    if (currentPage > newTotalPages && newTotalPages > 0) {
+      setCurrentPage(newTotalPages);
+    } else if (newTotal === 0) {
+      setCurrentPage(1);
+    }
   };
   const handleUpdateRole = async (id, role) => {
     await api.put(`/api/admin/users/${id}`, { role });
@@ -563,6 +643,18 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
     }
     return true;
   });
+
+  // Reset page whenever filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter, customerFilter, agentFilter]);
+
+  // Paginate filtered fields
+  const totalPages = Math.ceil(filteredFields.length / itemsPerPage);
+  const paginatedFields = filteredFields.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage,
+  );
 
   // Filter users based on search and role
   const filteredUsers = users.filter((u) => {
@@ -741,7 +833,6 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                 {user.role}
               </p>
             </div>
-            {/* Red theme sign out button */}
             <button
               onClick={handleLogout}
               className="flex items-center gap-1.5 text-xs font-medium text-white bg-red-500 hover:bg-red-600 dark:bg-red-600 dark:hover:bg-red-700 border border-red-600 dark:border-red-700 px-2 sm:px-3 py-1.5 rounded-lg transition shadow-sm"
@@ -999,6 +1090,20 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
               })}
             </div>
 
+            {/* Pagination (now above the table) */}
+            {filteredFields.length > 0 && (
+              <Pagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onPageChange={setCurrentPage}
+                itemsPerPage={itemsPerPage}
+                onItemsPerPageChange={(newSize) => {
+                  setItemsPerPage(newSize);
+                  setCurrentPage(1);
+                }}
+              />
+            )}
+
             {/* Fields table - orange theme with sticky columns */}
             <div className="bg-white dark:bg-gray-900 rounded-2xl border border-orange-200 dark:border-orange-900/50 overflow-hidden">
               <div className="overflow-x-auto">
@@ -1022,7 +1127,7 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredFields.length === 0 ? (
+                    {paginatedFields.length === 0 ? (
                       <tr>
                         <td
                           colSpan={
@@ -1056,7 +1161,7 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                         </td>
                       </tr>
                     ) : (
-                      filteredFields.map((field) => (
+                      paginatedFields.map((field) => (
                         <tr
                           key={field.id}
                           className="border-t border-orange-200 dark:border-orange-900/50 hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors"
@@ -1171,7 +1276,7 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
           </>
         )}
 
-        {/* Users tab - with search and role filter */}
+        {/* Users tab - unchanged */}
         {tab === "users" && isAdmin && (
           <>
             <div className="mb-6">
@@ -1183,7 +1288,6 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
               </p>
             </div>
 
-            {/* Search and filter row for users */}
             <div className="flex flex-wrap items-center gap-2 mb-6">
               <div className="relative flex-1 min-w-[200px]">
                 <svg
@@ -1265,7 +1369,6 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
               )}
             </div>
 
-            {/* Users table */}
             <div className="bg-white dark:bg-gray-900 rounded-2xl border border-orange-200 dark:border-orange-900/50 overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm border-collapse table-fixed min-w-[400px]">
