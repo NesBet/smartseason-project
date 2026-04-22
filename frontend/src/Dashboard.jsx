@@ -1,4 +1,4 @@
-// Dashboard.jsx (orange headers, orange borders in light mode, bold data)
+// Dashboard.jsx – with red sign‑out button
 import { useState, useEffect, useRef } from "react";
 import api from "./api";
 import ThemeToggle from "./ThemeToggle";
@@ -376,7 +376,7 @@ function FieldModal({ field, onSave, onClose, customers, agents, isAdmin }) {
   );
 }
 
-// ── Main Dashboard (full‑width layout with orange table styling) ──
+// ── Main Dashboard ───────────────────────────────────────────────
 export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
   const [tab, setTab] = useState("fields");
   const [fields, setFields] = useState([]);
@@ -391,6 +391,10 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
   const [agentFilter, setAgentFilter] = useState("all");
   const [fieldModal, setFieldModal] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+
+  // Users tab search & role filter
+  const [userSearch, setUserSearch] = useState("");
+  const [userRoleFilter, setUserRoleFilter] = useState("all");
 
   const isAdmin = user.role === "Admin";
   const isAgent = user.role === "Field Agent";
@@ -560,6 +564,15 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
     return true;
   });
 
+  // Filter users based on search and role
+  const filteredUsers = users.filter((u) => {
+    const matchesSearch = u.email
+      .toLowerCase()
+      .includes(userSearch.toLowerCase());
+    const matchesRole = userRoleFilter === "all" || u.role === userRoleFilter;
+    return matchesSearch && matchesRole;
+  });
+
   const stats = [
     {
       label: "Total",
@@ -627,7 +640,11 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
     },
   ];
 
-  // Updated table styling: orange headers in both themes, orange borders in light mode, bold data
+  // Sticky column classes
+  const firstColWidth = "min-w-[160px]";
+  const stickyFirstCol = `sticky left-0 bg-white dark:bg-gray-900 ${firstColWidth}`;
+  const stickySecondCol = `sticky left-[160px] bg-white dark:bg-gray-900 min-w-[120px]`;
+
   const thCls =
     "text-left text-xs font-medium uppercase tracking-wide px-4 py-3 whitespace-nowrap border-r border-orange-200 dark:border-orange-900/50 last:border-r-0 text-orange-600 dark:text-orange-400";
   const tdCls =
@@ -703,7 +720,11 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                 <button
                   key={item.id}
                   onClick={() => setTab(item.id)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition ${tab === item.id ? "bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400" : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-gray-800"}`}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition border ${
+                    tab === item.id
+                      ? "bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400 border-orange-400 dark:border-orange-500"
+                      : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-gray-800 border-gray-200 dark:border-gray-700"
+                  }`}
                 >
                   {item.label}
                 </button>
@@ -720,9 +741,10 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                 {user.role}
               </p>
             </div>
+            {/* Red theme sign out button */}
             <button
               onClick={handleLogout}
-              className="flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 border border-gray-200 dark:border-gray-700 hover:border-red-200 dark:hover:border-red-800 px-2 sm:px-3 py-1.5 rounded-lg transition"
+              className="flex items-center gap-1.5 text-xs font-medium text-white bg-red-500 hover:bg-red-600 dark:bg-red-600 dark:hover:bg-red-700 border border-red-600 dark:border-red-700 px-2 sm:px-3 py-1.5 rounded-lg transition shadow-sm"
             >
               <svg
                 className="w-3.5 h-3.5"
@@ -977,14 +999,18 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
               })}
             </div>
 
-            {/* Fields table - orange theme */}
+            {/* Fields table - orange theme with sticky columns */}
             <div className="bg-white dark:bg-gray-900 rounded-2xl border border-orange-200 dark:border-orange-900/50 overflow-hidden">
               <div className="overflow-x-auto">
-                <table className="w-full text-sm border-collapse min-w-[640px]">
+                <table className="w-full text-sm border-collapse min-w-[800px]">
                   <thead>
                     <tr className="border-b border-orange-200 dark:border-orange-900/50 bg-gray-50/50 dark:bg-gray-800/30">
-                      <th className={thCls}>Field</th>
-                      <th className={thCls}>Crop</th>
+                      <th className={`${thCls} ${stickyFirstCol} z-10`}>
+                        Field
+                      </th>
+                      <th className={`${thCls} ${stickySecondCol} z-10`}>
+                        Crop
+                      </th>
                       <th className={thCls}>Stage</th>
                       <th className={thCls}>Status</th>
                       <th className={thCls}>Last update</th>
@@ -1036,12 +1062,12 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                           className="border-t border-orange-200 dark:border-orange-900/50 hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors"
                         >
                           <td
-                            className={`${tdCls} font-bold text-gray-900 dark:text-white`}
+                            className={`${tdCls} ${stickyFirstCol} font-bold text-gray-900 dark:text-white`}
                           >
                             {field.name}
                           </td>
                           <td
-                            className={`${tdCls} font-bold text-gray-500 dark:text-gray-400`}
+                            className={`${tdCls} ${stickySecondCol} font-bold text-gray-500 dark:text-gray-400`}
                           >
                             {field.crop_type}
                           </td>
@@ -1145,7 +1171,7 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
           </>
         )}
 
-        {/* Users tab - also with orange styling */}
+        {/* Users tab - with search and role filter */}
         {tab === "users" && isAdmin && (
           <>
             <div className="mb-6">
@@ -1156,6 +1182,90 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                 Manage roles and access
               </p>
             </div>
+
+            {/* Search and filter row for users */}
+            <div className="flex flex-wrap items-center gap-2 mb-6">
+              <div className="relative flex-1 min-w-[200px]">
+                <svg
+                  className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"
+                  />
+                </svg>
+                <input
+                  type="text"
+                  className="w-full pl-8 pr-3 py-2 text-sm bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-teal-500 transition"
+                  placeholder="Search users by email..."
+                  value={userSearch}
+                  onChange={(e) => setUserSearch(e.target.value)}
+                />
+                {userSearch && (
+                  <button
+                    onClick={() => setUserSearch("")}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  >
+                    <svg
+                      className="w-3.5 h-3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M6 18L18 6M6 6l12 12"
+                      />
+                    </svg>
+                  </button>
+                )}
+              </div>
+
+              <select
+                className="text-sm bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-teal-500 transition"
+                value={userRoleFilter}
+                onChange={(e) => setUserRoleFilter(e.target.value)}
+              >
+                <option value="all">All roles</option>
+                <option value="Customer">Customer</option>
+                <option value="Field Agent">Field Agent</option>
+                <option value="Admin">Admin</option>
+              </select>
+
+              {(userSearch || userRoleFilter !== "all") && (
+                <button
+                  onClick={() => {
+                    setUserSearch("");
+                    setUserRoleFilter("all");
+                  }}
+                  className="text-xs text-gray-500 dark:text-gray-400 hover:text-red-500 dark:hover:text-red-400 border border-gray-200 dark:border-gray-700 hover:border-red-200 dark:hover:border-red-800 px-2.5 py-2 rounded-xl transition flex items-center gap-1"
+                >
+                  <svg
+                    className="w-3 h-3"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                  Clear
+                </button>
+              )}
+            </div>
+
+            {/* Users table */}
             <div className="bg-white dark:bg-gray-900 rounded-2xl border border-orange-200 dark:border-orange-900/50 overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm border-collapse table-fixed min-w-[400px]">
@@ -1172,65 +1282,92 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {users.map((u) => (
-                      <tr
-                        key={u.id}
-                        className="border-t border-orange-200 dark:border-orange-900/50 hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors"
-                      >
-                        <td className={`${tdCls} font-bold`}>
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-teal-400 to-green-500 flex items-center justify-center text-white text-xs font-semibold flex-shrink-0">
-                              {u.email[0].toUpperCase()}
+                    {filteredUsers.length === 0 ? (
+                      <tr>
+                        <td colSpan="3" className="text-center py-16">
+                          <div className="flex flex-col items-center gap-2">
+                            <div className="w-10 h-10 bg-gray-50 dark:bg-gray-800 rounded-xl flex items-center justify-center">
+                              <svg
+                                className="w-5 h-5 text-gray-300 dark:text-gray-600"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M12 4v16m8-8H4"
+                                />
+                              </svg>
                             </div>
-                            <span className="text-gray-900 dark:text-white truncate">
-                              {u.email}
-                            </span>
+                            <p className="text-sm text-gray-400 dark:text-gray-500">
+                              No users found
+                            </p>
                           </div>
                         </td>
-                        <td className={`${tdCls} font-bold`}>
-                          <select
-                            className="w-full text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-2.5 py-1.5 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-teal-500 transition disabled:opacity-40 disabled:cursor-not-allowed font-bold"
-                            defaultValue={u.role}
-                            disabled={u.id === user.id}
-                            onChange={(e) =>
-                              handleUpdateRole(u.id, e.target.value)
-                            }
-                          >
-                            <option>Customer</option>
-                            <option>Field Agent</option>
-                            <option>Admin</option>
-                          </select>
-                        </td>
-                        <td className={`${tdCls} text-right font-bold`}>
-                          <button
-                            onClick={() =>
-                              setConfirmDelete({
-                                type: "user",
-                                id: u.id,
-                                label: u.email,
-                              })
-                            }
-                            disabled={u.id === user.id}
-                            className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed"
-                            title="Delete user"
-                          >
-                            <svg
-                              className="w-3.5 h-3.5"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                              />
-                            </svg>
-                          </button>
-                        </td>
                       </tr>
-                    ))}
+                    ) : (
+                      filteredUsers.map((u) => (
+                        <tr
+                          key={u.id}
+                          className="border-t border-orange-200 dark:border-orange-900/50 hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors"
+                        >
+                          <td className={`${tdCls} font-bold`}>
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-teal-400 to-green-500 flex items-center justify-center text-white text-xs font-semibold flex-shrink-0">
+                                {u.email[0].toUpperCase()}
+                              </div>
+                              <span className="text-gray-900 dark:text-white truncate">
+                                {u.email}
+                              </span>
+                            </div>
+                          </td>
+                          <td className={`${tdCls} font-bold`}>
+                            <select
+                              className="w-full text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-2.5 py-1.5 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-teal-500 transition disabled:opacity-40 disabled:cursor-not-allowed font-bold"
+                              defaultValue={u.role}
+                              disabled={u.id === user.id}
+                              onChange={(e) =>
+                                handleUpdateRole(u.id, e.target.value)
+                              }
+                            >
+                              <option>Customer</option>
+                              <option>Field Agent</option>
+                              <option>Admin</option>
+                            </select>
+                          </td>
+                          <td className={`${tdCls} text-right font-bold`}>
+                            <button
+                              onClick={() =>
+                                setConfirmDelete({
+                                  type: "user",
+                                  id: u.id,
+                                  label: u.email,
+                                })
+                              }
+                              disabled={u.id === user.id}
+                              className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed"
+                              title="Delete user"
+                            >
+                              <svg
+                                className="w-3.5 h-3.5"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                />
+                              </svg>
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
