@@ -13,7 +13,6 @@ app.use(express.json());
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 // ── SSE: per-user connection registry ────────────────────────────
-// Maps userId → Set of SSE response objects (a user can have multiple tabs)
 const sseClients = new Map();
 
 const sseAdd = (userId, res) => {
@@ -27,6 +26,37 @@ const sseSend = (userId, event, data) => {
   sseClients.get(userId)?.forEach((res) => {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   });
+};
+
+// Helper to send events to all admins
+const sseSendToAdmins = async (event, data) => {
+  const result = await pool.query("SELECT id FROM users WHERE role = 'Admin'");
+  result.rows.forEach((admin) => {
+    sseSend(admin.id, event, data);
+  });
+};
+
+// Helper to send event to a specific field's agent and customer
+const sseSendToFieldParties = async (fieldId, event, data) => {
+  const result = await pool.query(
+    "SELECT agent_id, customer_id FROM fields WHERE id = $1",
+    [fieldId],
+  );
+  if (result.rows.length) {
+    const { agent_id, customer_id } = result.rows[0];
+    if (agent_id) sseSend(agent_id, event, data);
+    if (customer_id) sseSend(customer_id, event, data);
+  }
+};
+
+// Helper to record field update and trigger last_update
+const recordFieldUpdate = async (fieldId, agentId, stage, notes) => {
+  const updateNotes = notes || `Field updated to stage: ${stage}`;
+  await pool.query(
+    `INSERT INTO field_updates (field_id, agent_id, stage, notes, created_at)
+     VALUES ($1, $2, $3, $4, NOW())`,
+    [fieldId, agentId, stage, updateNotes],
+  );
 };
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -82,7 +112,6 @@ app.post("/api/login", async (req, res) => {
   }
 });
 
-// Default signup → Customer
 app.post("/api/signup", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -103,9 +132,8 @@ app.post("/api/signup", async (req, res) => {
   }
 });
 
-// ── SSE: client subscribes to role-change events ─────────────────
+// ── SSE: client subscribes to events ─────────────────────────────────
 app.get("/api/events", (req, res) => {
-  // EventSource cannot set custom headers, so accept token via query param
   const token = req.query.token || req.headers.authorization?.split(" ")[1];
   if (!token) return res.status(401).end();
 
@@ -121,7 +149,6 @@ app.get("/api/events", (req, res) => {
   res.setHeader("Connection", "keep-alive");
   res.flushHeaders();
 
-  // Send a heartbeat every 25 s to prevent proxy timeouts
   const heartbeat = setInterval(() => res.write(": heartbeat\n\n"), 25000);
 
   const userId = decoded.id;
@@ -156,12 +183,18 @@ app.put(
   requireRole("Admin"),
   async (req, res) => {
     try {
-      const { name, crop_type, current_stage, agent_id, customer_id } =
+      const { name, crop_type, current_stage, agent_id, customer_id, notes } =
         req.body;
+
+      // Get old field data to determine changes
+      const oldField = await pool.query("SELECT * FROM fields WHERE id = $1", [
+        req.params.id,
+      ]);
+
       await pool.query(
         `UPDATE fields
-       SET name=$1, crop_type=$2, current_stage=$3, agent_id=$4, customer_id=$5
-       WHERE id=$6`,
+         SET name=$1, crop_type=$2, current_stage=$3, agent_id=$4, customer_id=$5
+         WHERE id=$6`,
         [
           name,
           crop_type,
@@ -171,6 +204,20 @@ app.put(
           req.params.id,
         ],
       );
+
+      // Record the update with notes (or default message)
+      const updateNotes = notes || `Field updated by Admin: ${name}`;
+      await recordFieldUpdate(
+        req.params.id,
+        req.user.id,
+        current_stage,
+        updateNotes,
+      );
+
+      // Send SSE events
+      await sseSendToAdmins("refresh-fields", {});
+      await sseSendToFieldParties(req.params.id, "refresh-fields", {});
+
       res.json({ message: "Field updated." });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -184,7 +231,23 @@ app.delete(
   requireRole("Admin"),
   async (req, res) => {
     try {
+      // Get field info before deleting for SSE
+      const field = await pool.query(
+        "SELECT agent_id, customer_id FROM fields WHERE id = $1",
+        [req.params.id],
+      );
+
       await pool.query("DELETE FROM fields WHERE id=$1", [req.params.id]);
+
+      // Send SSE events
+      await sseSendToAdmins("refresh-fields", {});
+      if (field.rows.length) {
+        if (field.rows[0].agent_id)
+          sseSend(field.rows[0].agent_id, "refresh-fields", {});
+        if (field.rows[0].customer_id)
+          sseSend(field.rows[0].customer_id, "refresh-fields", {});
+      }
+
       res.json({ message: "Field deleted." });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -219,11 +282,32 @@ app.put(
       if (!["Admin", "Field Agent", "Customer"].includes(role))
         return res.status(400).json({ error: "Invalid role." });
 
+      // Get old role before update
+      const oldUser = await pool.query("SELECT role FROM users WHERE id = $1", [
+        req.params.id,
+      ]);
+      const oldRole = oldUser.rows[0]?.role;
+
       const result = await pool.query(
         "UPDATE users SET role=$1 WHERE id=$2 RETURNING id, email, role",
         [role, req.params.id],
       );
       const updated = result.rows[0];
+
+      // If role changed from Field Agent, unassign their fields
+      if (oldRole === "Field Agent" && role !== "Field Agent") {
+        await pool.query(
+          "UPDATE fields SET agent_id = NULL WHERE agent_id = $1",
+          [req.params.id],
+        );
+      }
+      // If role changed from Customer, unassign their fields
+      if (oldRole === "Customer" && role !== "Customer") {
+        await pool.query(
+          "UPDATE fields SET customer_id = NULL WHERE customer_id = $1",
+          [req.params.id],
+        );
+      }
 
       // Mint a fresh token for the affected user
       const newToken = jwt.sign(
@@ -232,9 +316,13 @@ app.put(
         { expiresIn: "8h" },
       );
 
-      // Push the new token to the affected user's active SSE connections
-      // so their UI updates instantly without a re-login
+      // Push the new token to the affected user
       sseSend(updated.id, "role-changed", { user: updated, token: newToken });
+
+      // Notify admins to refresh users and fields
+      await sseSendToAdmins("refresh-users", {});
+      await sseSendToAdmins("refresh-fields", {});
+      await sseSendToAdmins("refresh-dropdowns", {});
 
       res.json({ message: "Role updated.", user: updated, token: newToken });
     } catch (err) {
@@ -253,7 +341,34 @@ app.delete(
         return res
           .status(400)
           .json({ error: "You cannot delete your own account." });
+
+      // Get user info before deleting
+      const userToDelete = await pool.query(
+        "SELECT role FROM users WHERE id = $1",
+        [req.params.id],
+      );
+
+      // Unassign fields owned by this user
+      if (userToDelete.rows[0]?.role === "Field Agent") {
+        await pool.query(
+          "UPDATE fields SET agent_id = NULL WHERE agent_id = $1",
+          [req.params.id],
+        );
+      }
+      if (userToDelete.rows[0]?.role === "Customer") {
+        await pool.query(
+          "UPDATE fields SET customer_id = NULL WHERE customer_id = $1",
+          [req.params.id],
+        );
+      }
+
       await pool.query("DELETE FROM users WHERE id=$1", [req.params.id]);
+
+      // Notify admins to refresh
+      await sseSendToAdmins("refresh-users", {});
+      await sseSendToAdmins("refresh-fields", {});
+      await sseSendToAdmins("refresh-dropdowns", {});
+
       res.json({ message: "User deleted." });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -291,9 +406,10 @@ app.post(
         return res
           .status(400)
           .json({ error: "Name, crop type, and planting date are required." });
+
       const result = await pool.query(
         `INSERT INTO fields (name, crop_type, planting_date, current_stage, agent_id, customer_id)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+         VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
         [
           name,
           crop_type,
@@ -303,6 +419,19 @@ app.post(
           customer_id || null,
         ],
       );
+
+      // Record initial field update
+      await recordFieldUpdate(
+        result.rows[0].id,
+        req.user.id,
+        current_stage || "Planted",
+        "Field created",
+      );
+
+      // Notify relevant parties
+      await sseSendToAdmins("refresh-fields", {});
+      if (customer_id) sseSend(customer_id, "refresh-fields", {});
+
       res.status(201).json(result.rows[0]);
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -325,7 +454,7 @@ app.put(
         notes,
       } = req.body;
       const check = await pool.query(
-        "SELECT id FROM fields WHERE id=$1 AND agent_id=$2",
+        "SELECT id, customer_id FROM fields WHERE id=$1 AND agent_id=$2",
         [req.params.id, req.user.id],
       );
       if (!check.rows.length)
@@ -333,10 +462,11 @@ app.put(
           .status(403)
           .json({ error: "You can only edit your own fields." });
 
-      await pool.query("BEGIN");
+      const oldCustomerId = check.rows[0].customer_id;
+
       await pool.query(
         `UPDATE fields SET name=$1, crop_type=$2, planting_date=$3,
-       current_stage=$4, customer_id=$5 WHERE id=$6`,
+         current_stage=$4, customer_id=$5 WHERE id=$6`,
         [
           name,
           crop_type,
@@ -346,16 +476,27 @@ app.put(
           req.params.id,
         ],
       );
-      if (notes) {
-        await pool.query(
-          "INSERT INTO field_updates (field_id, agent_id, stage, notes) VALUES ($1,$2,$3,$4)",
-          [req.params.id, req.user.id, current_stage, notes],
-        );
+
+      // Always record the update with notes
+      await recordFieldUpdate(
+        req.params.id,
+        req.user.id,
+        current_stage,
+        notes || "Field updated by agent",
+      );
+
+      // Notify relevant parties
+      await sseSendToAdmins("refresh-fields", {});
+      sseSend(req.user.id, "refresh-fields", {});
+      if (customer_id && customer_id !== oldCustomerId) {
+        if (oldCustomerId) sseSend(oldCustomerId, "refresh-fields", {});
+        sseSend(customer_id, "refresh-fields", {});
+      } else if (customer_id) {
+        sseSend(customer_id, "refresh-fields", {});
       }
-      await pool.query("COMMIT");
+
       res.json({ message: "Field updated." });
     } catch (err) {
-      await pool.query("ROLLBACK");
       res.status(500).json({ error: err.message });
     }
   },

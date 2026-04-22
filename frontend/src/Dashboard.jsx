@@ -1,3 +1,4 @@
+// Dashboard.jsx (orange headers, orange borders in light mode, bold data)
 import { useState, useEffect, useRef } from "react";
 import api from "./api";
 import ThemeToggle from "./ThemeToggle";
@@ -242,7 +243,7 @@ function FieldModal({ field, onSave, onClose, customers, agents, isAdmin }) {
       <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 p-6 w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-base font-semibold text-gray-900 dark:text-white">
-            {isNew ? "Add new field" : "Edit field"}
+            {isNew ? "Add field" : "Edit field"}
           </h3>
           <button
             onClick={onClose}
@@ -375,7 +376,7 @@ function FieldModal({ field, onSave, onClose, customers, agents, isAdmin }) {
   );
 }
 
-// ── Main Dashboard ───────────────────────────────────────────────
+// ── Main Dashboard (full‑width layout with orange table styling) ──
 export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
   const [tab, setTab] = useState("fields");
   const [fields, setFields] = useState([]);
@@ -395,9 +396,27 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
   const isAgent = user.role === "Field Agent";
   const isCustomer = user.role === "Customer";
 
-  // ── SSE: listen for role changes pushed by the server ────────────
-  // This fires on the affected user's session regardless of who made the change,
-  // so a Customer promoted to Field Agent sees their UI update immediately.
+  // Remove default body margins to eliminate side blanks
+  useEffect(() => {
+    const originalMargin = document.body.style.margin;
+    const originalPadding = document.body.style.padding;
+    const htmlOriginalMargin = document.documentElement.style.margin;
+    const htmlOriginalPadding = document.documentElement.style.padding;
+
+    document.body.style.margin = "0";
+    document.body.style.padding = "0";
+    document.documentElement.style.margin = "0";
+    document.documentElement.style.padding = "0";
+
+    return () => {
+      document.body.style.margin = originalMargin;
+      document.body.style.padding = originalPadding;
+      document.documentElement.style.margin = htmlOriginalMargin;
+      document.documentElement.style.padding = htmlOriginalPadding;
+    };
+  }, []);
+
+  // SSE: listen for real-time events
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) return;
@@ -413,15 +432,24 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
       onUpdateUser(updatedUser);
     });
 
-    es.onerror = () => {
-      // Connection dropped (e.g. network blip) — EventSource auto-reconnects,
-      // so we don't need to do anything here.
-    };
+    es.addEventListener("refresh-fields", () => {
+      refreshFields();
+    });
+
+    es.addEventListener("refresh-users", () => {
+      if (isAdmin) refreshUsers();
+    });
+
+    es.addEventListener("refresh-dropdowns", () => {
+      refreshDropdowns();
+    });
+
+    es.onerror = () => {};
 
     return () => es.close();
-  }, [user.id]);
+  }, [user.id, user.role]);
 
-  // ── Data loading ──────────────────────────────────────────────────
+  // Data loading
   const getEndpoint = () =>
     isAdmin
       ? "/api/admin/fields"
@@ -433,7 +461,6 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
     api.get(getEndpoint()).then((r) => setFields(r.data));
   const refreshUsers = () =>
     api.get("/api/admin/users").then((r) => setUsers(r.data));
-  // Re-fetch the customers and agents lists used in the field edit dropdowns
   const refreshDropdowns = () =>
     Promise.all([
       api.get("/api/customers").then((r) => setCustomers(r.data)),
@@ -499,39 +526,31 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
   };
   const handleUpdateRole = async (id, role) => {
     await api.put(`/api/admin/users/${id}`, { role });
-    // Refresh users list, and immediately update the customers/agents dropdowns
-    // in the field edit modal so the role change is reflected in real time.
     await Promise.all([refreshUsers(), refreshDropdowns()]);
   };
   const handleDeleteUser = async (id) => {
     await api.delete(`/api/admin/users/${id}`);
-    await Promise.all([refreshUsers(), refreshDropdowns()]);
+    await Promise.all([refreshUsers(), refreshDropdowns(), refreshFields()]);
     setConfirmDelete(null);
   };
 
   const agentEmails = [
     ...new Set(fields.map((f) => f.agent_email).filter(Boolean)),
   ];
-
-  // Unique customer emails for filter dropdown (Admin & Agent only)
   const customerEmails = [
     ...new Set(fields.map((f) => f.customer_email).filter(Boolean)),
   ];
 
   const filteredFields = fields.filter((f) => {
-    // Agent filter (Admin only)
     if (agentFilter !== "all" && f.agent_email !== agentFilter) return false;
-    // Customer filter (Admin & Agent)
     if (
       !isCustomer &&
       customerFilter !== "all" &&
       f.customer_email !== customerFilter
     )
       return false;
-    // Status filter (clickable stat cards)
     if (statusFilter !== "all" && f.computed_status !== statusFilter)
       return false;
-    // Search: field name or customer email
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       const matchName = f.name?.toLowerCase().includes(q);
@@ -544,13 +563,17 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
   const stats = [
     {
       label: "Total",
-      value: fields.filter((f) =>
-        agentFilter === "all" || f.agent_email === agentFilter
-          ? !isCustomer && customerFilter !== "all"
-            ? f.customer_email === customerFilter
-            : true
-          : false,
-      ).length,
+      value: fields.filter((f) => {
+        if (agentFilter !== "all" && f.agent_email !== agentFilter)
+          return false;
+        if (
+          !isCustomer &&
+          customerFilter !== "all" &&
+          f.customer_email !== customerFilter
+        )
+          return false;
+        return true;
+      }).length,
       color: "text-gray-900 dark:text-white",
       clickFilter: "all",
     },
@@ -604,10 +627,11 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
     },
   ];
 
+  // Updated table styling: orange headers in both themes, orange borders in light mode, bold data
   const thCls =
-    "text-left text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide px-4 py-3 whitespace-nowrap border-r border-gray-100 dark:border-gray-800 last:border-r-0";
+    "text-left text-xs font-medium uppercase tracking-wide px-4 py-3 whitespace-nowrap border-r border-orange-200 dark:border-orange-900/50 last:border-r-0 text-orange-600 dark:text-orange-400";
   const tdCls =
-    "px-4 py-3 align-middle border-r border-gray-100 dark:border-gray-800 last:border-r-0";
+    "px-4 py-3 align-middle border-r border-orange-200 dark:border-orange-900/50 last:border-r-0 font-semibold";
 
   if (loading)
     return (
@@ -620,7 +644,7 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
     );
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 transition-colors duration-200">
+    <div className="min-h-screen w-full bg-gray-50 dark:bg-gray-950 transition-colors duration-200">
       {fieldModal && (
         <FieldModal
           field={fieldModal.isNew ? null : fieldModal.field}
@@ -647,12 +671,12 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
         />
       )}
 
-      {/* Header */}
+      {/* Header - full width */}
       <header className="bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800 sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-5 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-5">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 bg-gradient-to-br from-teal-500 to-green-600 rounded-lg flex items-center justify-center">
+        <div className="w-full px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
+          <div className="flex items-center gap-3 sm:gap-5 flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <div className="w-8 h-8 bg-gradient-to-br from-teal-500 to-green-600 rounded-lg flex items-center justify-center flex-shrink-0">
                 <svg
                   className="w-4 h-4 text-white"
                   fill="none"
@@ -671,7 +695,7 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                 SmartSeason
               </span>
             </div>
-            <nav className="flex gap-1">
+            <nav className="flex gap-1 overflow-x-auto">
               {[
                 { id: "fields", label: isAdmin ? "Fields" : "My Fields" },
                 ...(isAdmin ? [{ id: "users", label: "Users" }] : []),
@@ -679,17 +703,17 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                 <button
                   key={item.id}
                   onClick={() => setTab(item.id)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${tab === item.id ? "bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400" : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-gray-800"}`}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition ${tab === item.id ? "bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400" : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-gray-800"}`}
                 >
                   {item.label}
                 </button>
               ))}
             </nav>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-shrink-0">
             <ThemeToggle />
             <div className="hidden sm:block text-right pl-2 border-l border-gray-100 dark:border-gray-800 ml-1">
-              <p className="text-xs font-medium text-gray-900 dark:text-white leading-tight">
+              <p className="text-xs font-medium text-gray-900 dark:text-white leading-tight truncate max-w-[150px]">
                 {user.email}
               </p>
               <p className="text-xs text-gray-400 dark:text-gray-500">
@@ -698,7 +722,7 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
             </div>
             <button
               onClick={handleLogout}
-              className="flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 border border-gray-200 dark:border-gray-700 hover:border-red-200 dark:hover:border-red-800 px-3 py-1.5 rounded-lg transition ml-1"
+              className="flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 border border-gray-200 dark:border-gray-700 hover:border-red-200 dark:hover:border-red-800 px-2 sm:px-3 py-1.5 rounded-lg transition"
             >
               <svg
                 className="w-3.5 h-3.5"
@@ -719,7 +743,8 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-5 py-8">
+      {/* Main content - full width */}
+      <main className="w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {error && (
           <div className="mb-6 p-3.5 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800/50 rounded-xl flex items-center gap-2">
             <svg
@@ -759,16 +784,16 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
           </div>
         )}
 
-        {/* ── Fields tab ── */}
+        {/* Fields tab */}
         {tab === "fields" && (
           <>
             <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
               <div>
                 <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
                   {isCustomer
-                    ? "My Fields"
+                    ? "Fields"
                     : isAgent
-                      ? "My Fields"
+                      ? "Assigned Fields"
                       : "All Fields"}
                 </h2>
                 <p className="text-sm text-gray-400 dark:text-gray-500 mt-0.5">
@@ -776,7 +801,7 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                     ? "Monitor and manage all field data"
                     : isAgent
                       ? "Fields assigned to you"
-                      : "Fields assigned to your account"}
+                      : "Your fields"}
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
@@ -818,10 +843,9 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
               </div>
             </div>
 
-            {/* Search + Filters row */}
+            {/* Search + Filters */}
             <div className="flex flex-wrap items-center gap-2 mb-6">
-              {/* Search */}
-              <div className="relative flex-1 min-w-[180px] max-w-xs">
+              <div className="relative flex-1 min-w-[200px]">
                 <svg
                   className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none"
                   fill="none"
@@ -841,7 +865,7 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                   placeholder={
                     isCustomer
                       ? "Search fields..."
-                      : "Search field name or customer..."
+                      : "Search name or customer..."
                   }
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -868,7 +892,6 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                 )}
               </div>
 
-              {/* Status filter */}
               <select
                 className="text-sm bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-teal-500 transition"
                 value={statusFilter}
@@ -880,7 +903,6 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                 <option value="Completed">Completed</option>
               </select>
 
-              {/* Customer filter — Admin & Agent only */}
               {!isCustomer && customerEmails.length > 0 && (
                 <select
                   className="text-sm bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-teal-500 transition"
@@ -896,7 +918,6 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                 </select>
               )}
 
-              {/* Active filter chips */}
               {(searchQuery ||
                 statusFilter !== "all" ||
                 customerFilter !== "all") && (
@@ -921,7 +942,7 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                       d="M6 18L18 6M6 6l12 12"
                     />
                   </svg>
-                  Clear filters
+                  Clear
                 </button>
               )}
             </div>
@@ -956,12 +977,12 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
               })}
             </div>
 
-            {/* Table */}
-            <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 overflow-hidden">
+            {/* Fields table - orange theme */}
+            <div className="bg-white dark:bg-gray-900 rounded-2xl border border-orange-200 dark:border-orange-900/50 overflow-hidden">
               <div className="overflow-x-auto">
-                <table className="w-full text-sm border-collapse">
+                <table className="w-full text-sm border-collapse min-w-[640px]">
                   <thead>
-                    <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/30">
+                    <tr className="border-b border-orange-200 dark:border-orange-900/50 bg-gray-50/50 dark:bg-gray-800/30">
                       <th className={thCls}>Field</th>
                       <th className={thCls}>Crop</th>
                       <th className={thCls}>Stage</th>
@@ -1012,15 +1033,15 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                       filteredFields.map((field) => (
                         <tr
                           key={field.id}
-                          className="border-t border-gray-100 dark:border-gray-700/60 hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors"
+                          className="border-t border-orange-200 dark:border-orange-900/50 hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors"
                         >
                           <td
-                            className={`${tdCls} font-medium text-gray-900 dark:text-white`}
+                            className={`${tdCls} font-bold text-gray-900 dark:text-white`}
                           >
                             {field.name}
                           </td>
                           <td
-                            className={`${tdCls} text-gray-500 dark:text-gray-400`}
+                            className={`${tdCls} font-bold text-gray-500 dark:text-gray-400`}
                           >
                             {field.crop_type}
                           </td>
@@ -1033,13 +1054,13 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                             {statusBadge(field.computed_status)}
                           </td>
                           <td
-                            className={`${tdCls} text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap`}
+                            className={`${tdCls} text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap font-bold`}
                           >
                             {formatTs(field.last_update)}
                           </td>
                           {isAdmin && (
                             <td
-                              className={`${tdCls} text-xs text-gray-400 dark:text-gray-500`}
+                              className={`${tdCls} text-xs text-gray-400 dark:text-gray-500 font-bold`}
                             >
                               {field.agent_email || (
                                 <span className="text-gray-300 dark:text-gray-600">
@@ -1050,7 +1071,7 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                           )}
                           {!isCustomer && (
                             <td
-                              className={`${tdCls} text-xs text-gray-400 dark:text-gray-500`}
+                              className={`${tdCls} text-xs text-gray-400 dark:text-gray-500 font-bold`}
                             >
                               {field.customer_email || (
                                 <span className="text-gray-300 dark:text-gray-600">
@@ -1124,7 +1145,7 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
           </>
         )}
 
-        {/* ── Users tab ── */}
+        {/* Users tab - also with orange styling */}
         {tab === "users" && isAdmin && (
           <>
             <div className="mb-6">
@@ -1135,16 +1156,16 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                 Manage roles and access
               </p>
             </div>
-            <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 overflow-hidden">
+            <div className="bg-white dark:bg-gray-900 rounded-2xl border border-orange-200 dark:border-orange-900/50 overflow-hidden">
               <div className="overflow-x-auto">
-                <table className="w-full text-sm border-collapse table-fixed">
+                <table className="w-full text-sm border-collapse table-fixed min-w-[400px]">
                   <colgroup>
                     <col className="w-auto" />
                     <col style={{ width: "160px" }} />
                     <col style={{ width: "64px" }} />
                   </colgroup>
                   <thead>
-                    <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/30">
+                    <tr className="border-b border-orange-200 dark:border-orange-900/50 bg-gray-50/50 dark:bg-gray-800/30">
                       <th className={thCls}>User</th>
                       <th className={thCls}>Role</th>
                       <th className={`${thCls} text-right`}>Actions</th>
@@ -1154,9 +1175,9 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                     {users.map((u) => (
                       <tr
                         key={u.id}
-                        className="border-t border-gray-100 dark:border-gray-700/60 hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors"
+                        className="border-t border-orange-200 dark:border-orange-900/50 hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors"
                       >
-                        <td className={tdCls}>
+                        <td className={`${tdCls} font-bold`}>
                           <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-teal-400 to-green-500 flex items-center justify-center text-white text-xs font-semibold flex-shrink-0">
                               {u.email[0].toUpperCase()}
@@ -1166,9 +1187,9 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                             </span>
                           </div>
                         </td>
-                        <td className={tdCls}>
+                        <td className={`${tdCls} font-bold`}>
                           <select
-                            className="w-full text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-2.5 py-1.5 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-teal-500 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                            className="w-full text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-2.5 py-1.5 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-teal-500 transition disabled:opacity-40 disabled:cursor-not-allowed font-bold"
                             defaultValue={u.role}
                             disabled={u.id === user.id}
                             onChange={(e) =>
@@ -1180,7 +1201,7 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                             <option>Admin</option>
                           </select>
                         </td>
-                        <td className={`${tdCls} text-right`}>
+                        <td className={`${tdCls} text-right font-bold`}>
                           <button
                             onClick={() =>
                               setConfirmDelete({
