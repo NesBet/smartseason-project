@@ -1,4 +1,4 @@
-// Dashboard.jsx – pagination above the table
+// Dashboard.jsx – pagination settings persist via localStorage
 import { useState, useEffect, useRef } from "react";
 import api from "./api";
 import ThemeToggle from "./ThemeToggle";
@@ -464,9 +464,21 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
   const [userSearch, setUserSearch] = useState("");
   const [userRoleFilter, setUserRoleFilter] = useState("all");
 
-  // Pagination state
+  // Pagination state – restore saved itemsPerPage from localStorage
+  const getStoredItemsPerPage = () => {
+    const saved = localStorage.getItem("fieldsItemsPerPage");
+    if (saved && [5, 10, 25, 50].includes(Number(saved))) {
+      return Number(saved);
+    }
+    return 10;
+  };
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(getStoredItemsPerPage);
+
+  // Save itemsPerPage to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem("fieldsItemsPerPage", itemsPerPage);
+  }, [itemsPerPage]);
 
   const isAdmin = user.role === "Admin";
   const isAgent = user.role === "Field Agent";
@@ -1090,7 +1102,7 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
               })}
             </div>
 
-            {/* Pagination (now above the table) */}
+            {/* Pagination (above the table) */}
             {filteredFields.length > 0 && (
               <Pagination
                 currentPage={currentPage}
