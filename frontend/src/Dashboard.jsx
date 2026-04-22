@@ -1,4 +1,4 @@
-// Dashboard.jsx – pagination settings persist via localStorage
+// Dashboard.jsx – sticky columns only on large screens, clickable rows with role‑based actions
 import { useState, useEffect, useRef } from "react";
 import api from "./api";
 import ThemeToggle from "./ThemeToggle";
@@ -200,7 +200,7 @@ function ConfirmModal({ message, onConfirm, onCancel }) {
   );
 }
 
-// ── Field modal ──────────────────────────────────────────────────
+// ── Field modal (edit) ──────────────────────────────────────────
 function FieldModal({ field, onSave, onClose, customers, agents, isAdmin }) {
   const isNew = !field?.id;
   const [form, setForm] = useState({
@@ -376,6 +376,111 @@ function FieldModal({ field, onSave, onClose, customers, agents, isAdmin }) {
   );
 }
 
+// ── View-only Field Detail Modal (for customers) ─────────────────
+function FieldDetailModal({ field, onClose }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 dark:bg-black/60 backdrop-blur-sm p-4">
+      <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 p-6 w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="text-base font-semibold text-gray-900 dark:text-white">
+            Field Details
+          </h3>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+          >
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
+          </button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+              Field name
+            </label>
+            <p className="text-sm text-gray-900 dark:text-white font-medium">
+              {field.name}
+            </p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+              Crop type
+            </label>
+            <p className="text-sm text-gray-900 dark:text-white">
+              {field.crop_type}
+            </p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+              Planting date
+            </label>
+            <p className="text-sm text-gray-900 dark:text-white">
+              {field.planting_date ? field.planting_date.split("T")[0] : "—"}
+            </p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+              Current stage
+            </label>
+            <p className="text-sm text-gray-900 dark:text-white">
+              {field.current_stage}
+            </p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+              Status
+            </label>
+            <div>{statusBadge(field.computed_status)}</div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+              Last update
+            </label>
+            <p className="text-sm text-gray-900 dark:text-white">
+              {formatTs(field.last_update)}
+            </p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+              Customer
+            </label>
+            <p className="text-sm text-gray-900 dark:text-white">
+              {field.customer_email || "—"}
+            </p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+              Assigned agent
+            </label>
+            <p className="text-sm text-gray-900 dark:text-white">
+              {field.agent_email || "—"}
+            </p>
+          </div>
+        </div>
+        <div className="flex gap-2 mt-6">
+          <button
+            onClick={onClose}
+            className="flex-1 py-2.5 text-sm font-medium text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl border border-gray-200 dark:border-gray-700 transition"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Pagination component ─────────────────────────────────────────
 function Pagination({
   currentPage,
@@ -457,7 +562,8 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [agentFilter, setAgentFilter] = useState("all");
-  const [fieldModal, setFieldModal] = useState(null);
+  const [fieldModal, setFieldModal] = useState(null); // for edit/add
+  const [viewField, setViewField] = useState(null); // for customer view-only
   const [confirmDelete, setConfirmDelete] = useState(null);
 
   // Users tab search & role filter
@@ -475,7 +581,6 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(getStoredItemsPerPage);
 
-  // Save itemsPerPage to localStorage whenever it changes
   useEffect(() => {
     localStorage.setItem("fieldsItemsPerPage", itemsPerPage);
   }, [itemsPerPage]);
@@ -661,14 +766,12 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
     setCurrentPage(1);
   }, [searchQuery, statusFilter, customerFilter, agentFilter]);
 
-  // Paginate filtered fields
   const totalPages = Math.ceil(filteredFields.length / itemsPerPage);
   const paginatedFields = filteredFields.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage,
   );
 
-  // Filter users based on search and role
   const filteredUsers = users.filter((u) => {
     const matchesSearch = u.email
       .toLowerCase()
@@ -744,15 +847,24 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
     },
   ];
 
-  // Sticky column classes
+  // Responsive sticky classes – only apply sticky on large screens (lg:)
   const firstColWidth = "min-w-[160px]";
-  const stickyFirstCol = `sticky left-0 bg-white dark:bg-gray-900 ${firstColWidth}`;
-  const stickySecondCol = `sticky left-[160px] bg-white dark:bg-gray-900 min-w-[120px]`;
+  const stickyFirstCol = `lg:sticky lg:left-0 bg-white dark:bg-gray-900 ${firstColWidth}`;
+  const stickySecondCol = `lg:sticky lg:left-[160px] bg-white dark:bg-gray-900 min-w-[120px]`;
 
   const thCls =
     "text-left text-xs font-medium uppercase tracking-wide px-4 py-3 whitespace-nowrap border-r border-orange-200 dark:border-orange-900/50 last:border-r-0 text-orange-600 dark:text-orange-400";
   const tdCls =
     "px-4 py-3 align-middle border-r border-orange-200 dark:border-orange-900/50 last:border-r-0 font-semibold";
+
+  // Handle row click – edit for agents/admins, view-only for customers
+  const handleRowClick = (field) => {
+    if (isAdmin || isAgent) {
+      setFieldModal({ field }); // opens edit modal
+    } else if (isCustomer) {
+      setViewField(field); // opens view-only modal
+    }
+  };
 
   if (loading)
     return (
@@ -778,6 +890,12 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
           customers={customers}
           agents={agents}
           isAdmin={isAdmin}
+        />
+      )}
+      {viewField && (
+        <FieldDetailModal
+          field={viewField}
+          onClose={() => setViewField(null)}
         />
       )}
       {confirmDelete && (
@@ -868,7 +986,7 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
         </div>
       </header>
 
-      {/* Main content - full width */}
+      {/* Main content */}
       <main className="w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {error && (
           <div className="mb-6 p-3.5 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800/50 rounded-xl flex items-center gap-2">
@@ -1102,7 +1220,7 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
               })}
             </div>
 
-            {/* Pagination (above the table) */}
+            {/* Pagination (above table) */}
             {filteredFields.length > 0 && (
               <Pagination
                 currentPage={currentPage}
@@ -1116,7 +1234,7 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
               />
             )}
 
-            {/* Fields table - orange theme with sticky columns */}
+            {/* Fields table - responsive sticky columns & clickable rows */}
             <div className="bg-white dark:bg-gray-900 rounded-2xl border border-orange-200 dark:border-orange-900/50 overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm border-collapse min-w-[800px]">
@@ -1176,7 +1294,8 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                       paginatedFields.map((field) => (
                         <tr
                           key={field.id}
-                          className="border-t border-orange-200 dark:border-orange-900/50 hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors"
+                          onClick={() => handleRowClick(field)}
+                          className="border-t border-orange-200 dark:border-orange-900/50 hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors cursor-pointer"
                         >
                           <td
                             className={`${tdCls} ${stickyFirstCol} font-bold text-gray-900 dark:text-white`}
@@ -1227,10 +1346,14 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                             <td
                               className={tdCls}
                               style={{ textAlign: "right" }}
+                              onClick={(e) => e.stopPropagation()}
                             >
                               <div className="inline-flex items-center gap-1">
                                 <button
-                                  onClick={() => setFieldModal({ field })}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setFieldModal({ field });
+                                  }}
                                   className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-teal-600 dark:hover:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/30 rounded-lg transition"
                                   title="Edit"
                                 >
@@ -1250,13 +1373,14 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
                                 </button>
                                 {isAdmin && (
                                   <button
-                                    onClick={() =>
+                                    onClick={(e) => {
+                                      e.stopPropagation();
                                       setConfirmDelete({
                                         type: "field",
                                         id: field.id,
                                         label: field.name,
-                                      })
-                                    }
+                                      });
+                                    }}
                                     className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition"
                                     title="Delete"
                                   >
@@ -1288,7 +1412,7 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
           </>
         )}
 
-        {/* Users tab - unchanged */}
+        {/* Users tab (unchanged) */}
         {tab === "users" && isAdmin && (
           <>
             <div className="mb-6">
