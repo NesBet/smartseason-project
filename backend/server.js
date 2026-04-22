@@ -12,6 +12,23 @@ app.use(express.json());
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
+// ── SSE: per-user connection registry ────────────────────────────
+// Maps userId → Set of SSE response objects (a user can have multiple tabs)
+const sseClients = new Map();
+
+const sseAdd = (userId, res) => {
+  if (!sseClients.has(userId)) sseClients.set(userId, new Set());
+  sseClients.get(userId).add(res);
+};
+const sseRemove = (userId, res) => {
+  sseClients.get(userId)?.delete(res);
+};
+const sseSend = (userId, event, data) => {
+  sseClients.get(userId)?.forEach((res) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  });
+};
+
 // ── Helpers ──────────────────────────────────────────────────────
 const computeStatus = (field, lastUpdateDate) => {
   if (field.current_stage === "Harvested") return "Completed";
@@ -84,6 +101,36 @@ app.post("/api/signup", async (req, res) => {
       return res.status(409).json({ error: "Email already registered." });
     res.status(500).json({ error: err.message });
   }
+});
+
+// ── SSE: client subscribes to role-change events ─────────────────
+app.get("/api/events", (req, res) => {
+  // EventSource cannot set custom headers, so accept token via query param
+  const token = req.query.token || req.headers.authorization?.split(" ")[1];
+  if (!token) return res.status(401).end();
+
+  let decoded;
+  try {
+    decoded = jwt.verify(token, process.env.JWT_SECRET);
+  } catch {
+    return res.status(401).end();
+  }
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+
+  // Send a heartbeat every 25 s to prevent proxy timeouts
+  const heartbeat = setInterval(() => res.write(": heartbeat\n\n"), 25000);
+
+  const userId = decoded.id;
+  sseAdd(userId, res);
+
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    sseRemove(userId, res);
+  });
 });
 
 // ── Admin: Fields ─────────────────────────────────────────────────
@@ -171,11 +218,25 @@ app.put(
       const { role } = req.body;
       if (!["Admin", "Field Agent", "Customer"].includes(role))
         return res.status(400).json({ error: "Invalid role." });
-      await pool.query("UPDATE users SET role=$1 WHERE id=$2", [
-        role,
-        req.params.id,
-      ]);
-      res.json({ message: "Role updated." });
+
+      const result = await pool.query(
+        "UPDATE users SET role=$1 WHERE id=$2 RETURNING id, email, role",
+        [role, req.params.id],
+      );
+      const updated = result.rows[0];
+
+      // Mint a fresh token for the affected user
+      const newToken = jwt.sign(
+        { id: updated.id, email: updated.email, role: updated.role },
+        process.env.JWT_SECRET,
+        { expiresIn: "8h" },
+      );
+
+      // Push the new token to the affected user's active SSE connections
+      // so their UI updates instantly without a re-login
+      sseSend(updated.id, "role-changed", { user: updated, token: newToken });
+
+      res.json({ message: "Role updated.", user: updated, token: newToken });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

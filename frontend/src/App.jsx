@@ -6,7 +6,7 @@ import { ThemeProvider } from "./ThemeContext";
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [page, setPage] = useState("signup");
+  const [page, setPage] = useState("login");
   const [hydrated, setHydrated] = useState(false);
 
   // Restore session on reload
@@ -41,7 +41,14 @@ export default function App() {
   return (
     <ThemeProvider>
       {user ? (
-        <Dashboard user={user} onLogout={handleLogout} />
+        <Dashboard
+          user={user}
+          onLogout={handleLogout}
+          onUpdateUser={(updatedUser) => {
+            localStorage.setItem("user", JSON.stringify(updatedUser));
+            setUser(updatedUser);
+          }}
+        />
       ) : page === "signup" ? (
         <Signup onSwitch={() => setPage("login")} />
       ) : (

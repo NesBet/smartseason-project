@@ -376,10 +376,13 @@ function FieldModal({ field, onSave, onClose, customers, agents, isAdmin }) {
 }
 
 // ── Main Dashboard ───────────────────────────────────────────────
-export default function Dashboard({ user, onLogout }) {
+export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
   const [tab, setTab] = useState("fields");
   const [fields, setFields] = useState([]);
   const [users, setUsers] = useState([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [customerFilter, setCustomerFilter] = useState("all");
   const [customers, setCustomers] = useState([]);
   const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -392,6 +395,33 @@ export default function Dashboard({ user, onLogout }) {
   const isAgent = user.role === "Field Agent";
   const isCustomer = user.role === "Customer";
 
+  // ── SSE: listen for role changes pushed by the server ────────────
+  // This fires on the affected user's session regardless of who made the change,
+  // so a Customer promoted to Field Agent sees their UI update immediately.
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    const es = new EventSource(
+      `${import.meta.env.VITE_API_URL || ""}/api/events?token=${token}`,
+    );
+
+    es.addEventListener("role-changed", (e) => {
+      const { user: updatedUser, token: newToken } = JSON.parse(e.data);
+      localStorage.setItem("token", newToken);
+      localStorage.setItem("user", JSON.stringify(updatedUser));
+      onUpdateUser(updatedUser);
+    });
+
+    es.onerror = () => {
+      // Connection dropped (e.g. network blip) — EventSource auto-reconnects,
+      // so we don't need to do anything here.
+    };
+
+    return () => es.close();
+  }, [user.id]);
+
+  // ── Data loading ──────────────────────────────────────────────────
   const getEndpoint = () =>
     isAdmin
       ? "/api/admin/fields"
@@ -403,6 +433,12 @@ export default function Dashboard({ user, onLogout }) {
     api.get(getEndpoint()).then((r) => setFields(r.data));
   const refreshUsers = () =>
     api.get("/api/admin/users").then((r) => setUsers(r.data));
+  // Re-fetch the customers and agents lists used in the field edit dropdowns
+  const refreshDropdowns = () =>
+    Promise.all([
+      api.get("/api/customers").then((r) => setCustomers(r.data)),
+      api.get("/api/agents").then((r) => setAgents(r.data)),
+    ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -463,51 +499,115 @@ export default function Dashboard({ user, onLogout }) {
   };
   const handleUpdateRole = async (id, role) => {
     await api.put(`/api/admin/users/${id}`, { role });
-    await refreshUsers();
+    // Refresh users list, and immediately update the customers/agents dropdowns
+    // in the field edit modal so the role change is reflected in real time.
+    await Promise.all([refreshUsers(), refreshDropdowns()]);
   };
   const handleDeleteUser = async (id) => {
     await api.delete(`/api/admin/users/${id}`);
-    await refreshUsers();
+    await Promise.all([refreshUsers(), refreshDropdowns()]);
     setConfirmDelete(null);
   };
 
   const agentEmails = [
     ...new Set(fields.map((f) => f.agent_email).filter(Boolean)),
   ];
-  const filteredFields =
-    agentFilter === "all"
-      ? fields
-      : fields.filter((f) => f.agent_email === agentFilter);
+
+  // Unique customer emails for filter dropdown (Admin & Agent only)
+  const customerEmails = [
+    ...new Set(fields.map((f) => f.customer_email).filter(Boolean)),
+  ];
+
+  const filteredFields = fields.filter((f) => {
+    // Agent filter (Admin only)
+    if (agentFilter !== "all" && f.agent_email !== agentFilter) return false;
+    // Customer filter (Admin & Agent)
+    if (
+      !isCustomer &&
+      customerFilter !== "all" &&
+      f.customer_email !== customerFilter
+    )
+      return false;
+    // Status filter (clickable stat cards)
+    if (statusFilter !== "all" && f.computed_status !== statusFilter)
+      return false;
+    // Search: field name or customer email
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      const matchName = f.name?.toLowerCase().includes(q);
+      const matchCustomer = f.customer_email?.toLowerCase().includes(q);
+      if (!matchName && !matchCustomer) return false;
+    }
+    return true;
+  });
 
   const stats = [
     {
       label: "Total",
-      value: filteredFields.length,
+      value: fields.filter((f) =>
+        agentFilter === "all" || f.agent_email === agentFilter
+          ? !isCustomer && customerFilter !== "all"
+            ? f.customer_email === customerFilter
+            : true
+          : false,
+      ).length,
       color: "text-gray-900 dark:text-white",
+      clickFilter: "all",
     },
     {
       label: "Active",
-      value: filteredFields.filter((f) => f.computed_status === "Active")
-        .length,
+      value: fields.filter((f) => {
+        if (agentFilter !== "all" && f.agent_email !== agentFilter)
+          return false;
+        if (
+          !isCustomer &&
+          customerFilter !== "all" &&
+          f.customer_email !== customerFilter
+        )
+          return false;
+        return f.computed_status === "Active";
+      }).length,
       color: "text-green-600 dark:text-green-400",
+      clickFilter: "Active",
     },
     {
       label: "At risk",
-      value: filteredFields.filter((f) => f.computed_status === "At Risk")
-        .length,
+      value: fields.filter((f) => {
+        if (agentFilter !== "all" && f.agent_email !== agentFilter)
+          return false;
+        if (
+          !isCustomer &&
+          customerFilter !== "all" &&
+          f.customer_email !== customerFilter
+        )
+          return false;
+        return f.computed_status === "At Risk";
+      }).length,
       color: "text-orange-500 dark:text-orange-400",
+      clickFilter: "At Risk",
     },
     {
       label: "Completed",
-      value: filteredFields.filter((f) => f.computed_status === "Completed")
-        .length,
+      value: fields.filter((f) => {
+        if (agentFilter !== "all" && f.agent_email !== agentFilter)
+          return false;
+        if (
+          !isCustomer &&
+          customerFilter !== "all" &&
+          f.customer_email !== customerFilter
+        )
+          return false;
+        return f.computed_status === "Completed";
+      }).length,
       color: "text-gray-400 dark:text-gray-500",
+      clickFilter: "Completed",
     },
   ];
 
   const thCls =
-    "text-left text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide px-4 py-3 whitespace-nowrap";
-  const tdCls = "px-4 py-3 align-middle";
+    "text-left text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide px-4 py-3 whitespace-nowrap border-r border-gray-100 dark:border-gray-800 last:border-r-0";
+  const tdCls =
+    "px-4 py-3 align-middle border-r border-gray-100 dark:border-gray-800 last:border-r-0";
 
   if (loading)
     return (
@@ -662,7 +762,7 @@ export default function Dashboard({ user, onLogout }) {
         {/* ── Fields tab ── */}
         {tab === "fields" && (
           <>
-            <div className="flex flex-wrap items-start justify-between gap-3 mb-6">
+            <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
               <div>
                 <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
                   {isCustomer
@@ -718,21 +818,142 @@ export default function Dashboard({ user, onLogout }) {
               </div>
             </div>
 
+            {/* Search + Filters row */}
+            <div className="flex flex-wrap items-center gap-2 mb-6">
+              {/* Search */}
+              <div className="relative flex-1 min-w-[180px] max-w-xs">
+                <svg
+                  className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"
+                  />
+                </svg>
+                <input
+                  type="text"
+                  className="w-full pl-8 pr-3 py-2 text-sm bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-teal-500 transition"
+                  placeholder={
+                    isCustomer
+                      ? "Search fields..."
+                      : "Search field name or customer..."
+                  }
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  >
+                    <svg
+                      className="w-3.5 h-3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M6 18L18 6M6 6l12 12"
+                      />
+                    </svg>
+                  </button>
+                )}
+              </div>
+
+              {/* Status filter */}
+              <select
+                className="text-sm bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-teal-500 transition"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+              >
+                <option value="all">All statuses</option>
+                <option value="Active">Active</option>
+                <option value="At Risk">At Risk</option>
+                <option value="Completed">Completed</option>
+              </select>
+
+              {/* Customer filter — Admin & Agent only */}
+              {!isCustomer && customerEmails.length > 0 && (
+                <select
+                  className="text-sm bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-teal-500 transition"
+                  value={customerFilter}
+                  onChange={(e) => setCustomerFilter(e.target.value)}
+                >
+                  <option value="all">All customers</option>
+                  {customerEmails.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              )}
+
+              {/* Active filter chips */}
+              {(searchQuery ||
+                statusFilter !== "all" ||
+                customerFilter !== "all") && (
+                <button
+                  onClick={() => {
+                    setSearchQuery("");
+                    setStatusFilter("all");
+                    setCustomerFilter("all");
+                  }}
+                  className="text-xs text-gray-500 dark:text-gray-400 hover:text-red-500 dark:hover:text-red-400 border border-gray-200 dark:border-gray-700 hover:border-red-200 dark:hover:border-red-800 px-2.5 py-2 rounded-xl transition flex items-center gap-1"
+                >
+                  <svg
+                    className="w-3 h-3"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                  Clear filters
+                </button>
+              )}
+            </div>
+
             {/* Stats */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-              {stats.map((s) => (
-                <div
-                  key={s.label}
-                  className="bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 p-4"
-                >
-                  <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">
-                    {s.label}
-                  </p>
-                  <p className={`text-2xl font-semibold ${s.color}`}>
-                    {s.value}
-                  </p>
-                </div>
-              ))}
+              {stats.map((s) => {
+                const isActive = statusFilter === s.clickFilter;
+                return (
+                  <button
+                    key={s.label}
+                    onClick={() =>
+                      setStatusFilter(isActive ? "all" : s.clickFilter)
+                    }
+                    className={`text-left bg-white dark:bg-gray-900 rounded-xl border p-4 transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-teal-500 ${
+                      isActive
+                        ? "border-teal-400 dark:border-teal-600 ring-1 ring-teal-400 dark:ring-teal-600 shadow-sm"
+                        : "border-gray-100 dark:border-gray-800 hover:border-gray-200 dark:hover:border-gray-700 hover:shadow-sm"
+                    }`}
+                  >
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mb-1 flex items-center gap-1">
+                      {s.label}
+                      {isActive && (
+                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-teal-500 ml-0.5" />
+                      )}
+                    </p>
+                    <p className={`text-2xl font-semibold ${s.color}`}>
+                      {s.value}
+                    </p>
+                  </button>
+                );
+              })}
             </div>
 
             {/* Table */}
@@ -740,7 +961,7 @@ export default function Dashboard({ user, onLogout }) {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm border-collapse">
                   <thead>
-                    <tr className="border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/30">
+                    <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/30">
                       <th className={thCls}>Field</th>
                       <th className={thCls}>Crop</th>
                       <th className={thCls}>Stage</th>
@@ -749,16 +970,22 @@ export default function Dashboard({ user, onLogout }) {
                       {isAdmin && <th className={thCls}>Agent</th>}
                       {!isCustomer && <th className={thCls}>Customer</th>}
                       {(isAdmin || isAgent) && (
-                        <th className={thCls} style={{ textAlign: "right" }}>
-                          Actions
-                        </th>
+                        <th className={`${thCls} text-right`}>Actions</th>
                       )}
                     </tr>
                   </thead>
                   <tbody>
                     {filteredFields.length === 0 ? (
                       <tr>
-                        <td colSpan="8" className="text-center py-16">
+                        <td
+                          colSpan={
+                            6 +
+                            (isAdmin ? 1 : 0) +
+                            (!isCustomer ? 1 : 0) +
+                            (isAdmin || isAgent ? 1 : 0)
+                          }
+                          className="text-center py-16"
+                        >
                           <div className="flex flex-col items-center gap-2">
                             <div className="w-10 h-10 bg-gray-50 dark:bg-gray-800 rounded-xl flex items-center justify-center">
                               <svg
@@ -785,7 +1012,7 @@ export default function Dashboard({ user, onLogout }) {
                       filteredFields.map((field) => (
                         <tr
                           key={field.id}
-                          className="border-t border-gray-50 dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors"
+                          className="border-t border-gray-100 dark:border-gray-700/60 hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors"
                         >
                           <td
                             className={`${tdCls} font-medium text-gray-900 dark:text-white`}
@@ -910,35 +1137,38 @@ export default function Dashboard({ user, onLogout }) {
             </div>
             <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 overflow-hidden">
               <div className="overflow-x-auto">
-                <table className="w-full text-sm border-collapse">
+                <table className="w-full text-sm border-collapse table-fixed">
+                  <colgroup>
+                    <col className="w-auto" />
+                    <col style={{ width: "160px" }} />
+                    <col style={{ width: "64px" }} />
+                  </colgroup>
                   <thead>
-                    <tr className="border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/30">
+                    <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/30">
                       <th className={thCls}>User</th>
                       <th className={thCls}>Role</th>
-                      <th className={thCls} style={{ textAlign: "right" }}>
-                        Actions
-                      </th>
+                      <th className={`${thCls} text-right`}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {users.map((u) => (
                       <tr
                         key={u.id}
-                        className="border-t border-gray-50 dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors"
+                        className="border-t border-gray-100 dark:border-gray-700/60 hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors"
                       >
                         <td className={tdCls}>
                           <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-teal-400 to-green-500 flex items-center justify-center text-white text-xs font-semibold flex-shrink-0">
                               {u.email[0].toUpperCase()}
                             </div>
-                            <span className="text-gray-900 dark:text-white">
+                            <span className="text-gray-900 dark:text-white truncate">
                               {u.email}
                             </span>
                           </div>
                         </td>
                         <td className={tdCls}>
                           <select
-                            className="text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-2.5 py-1.5 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-teal-500 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                            className="w-full text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-2.5 py-1.5 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-teal-500 transition disabled:opacity-40 disabled:cursor-not-allowed"
                             defaultValue={u.role}
                             disabled={u.id === user.id}
                             onChange={(e) =>
@@ -950,7 +1180,7 @@ export default function Dashboard({ user, onLogout }) {
                             <option>Admin</option>
                           </select>
                         </td>
-                        <td className={tdCls} style={{ textAlign: "right" }}>
+                        <td className={`${tdCls} text-right`}>
                           <button
                             onClick={() =>
                               setConfirmDelete({
