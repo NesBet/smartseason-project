@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import api from "./api";
 import ThemeToggle from "./ThemeToggle";
 
-// ── Timestamp helper ─────────────────────────────────────────────
+// Timestamp helper
 const formatTs = (ts) => {
   if (!ts) return "—";
   const d = new Date(ts);
@@ -21,7 +21,7 @@ const formatTs = (ts) => {
   );
 };
 
-// ── Badges ───────────────────────────────────────────────────────
+// Badges
 const statusBadge = (status) => {
   const map = {
     Active:
@@ -48,7 +48,7 @@ const statusBadge = (status) => {
   );
 };
 
-// ── Searchable customer dropdown ─────────────────────────────────
+// Searchable customer dropdown
 function CustomerSelect({
   customers,
   value,
@@ -154,7 +154,7 @@ function CustomerSelect({
   );
 }
 
-// ── Confirm modal ────────────────────────────────────────────────
+// Confirm modal
 function ConfirmModal({ message, onConfirm, onCancel }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 dark:bg-black/60 backdrop-blur-sm p-4">
@@ -199,7 +199,7 @@ function ConfirmModal({ message, onConfirm, onCancel }) {
   );
 }
 
-// ── Field modal (edit) ──────────────────────────────────────────
+// Field modal (edit)
 function FieldModal({ field, onSave, onClose, customers, agents, isAdmin }) {
   const isNew = !field?.id;
   const [form, setForm] = useState({
@@ -375,7 +375,7 @@ function FieldModal({ field, onSave, onClose, customers, agents, isAdmin }) {
   );
 }
 
-// ── View-only Field Detail Modal (for customers) ─────────────────
+// View-only Field Detail Modal (for customers)
 function FieldDetailModal({ field, onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 dark:bg-black/60 backdrop-blur-sm p-4">
@@ -480,7 +480,7 @@ function FieldDetailModal({ field, onClose }) {
   );
 }
 
-// ── Pagination component ─────────────────────────────────────────
+// Pagination component
 function Pagination({
   currentPage,
   totalPages,
@@ -548,7 +548,7 @@ function Pagination({
   );
 }
 
-// ── Main Dashboard ───────────────────────────────────────────────
+// Main Dashboard
 export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
   const [tab, setTab] = useState("fields");
   const [fields, setFields] = useState([]);
@@ -561,15 +561,13 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [agentFilter, setAgentFilter] = useState("all");
-  const [fieldModal, setFieldModal] = useState(null); // for edit/add
-  const [viewField, setViewField] = useState(null); // for customer view-only
+  const [fieldModal, setFieldModal] = useState(null);
+  const [viewField, setViewField] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
 
-  // Users tab search & role filter
   const [userSearch, setUserSearch] = useState("");
   const [userRoleFilter, setUserRoleFilter] = useState("all");
 
-  // Pagination state – restore saved itemsPerPage from localStorage
   const getStoredItemsPerPage = () => {
     const saved = localStorage.getItem("fieldsItemsPerPage");
     if (saved && [5, 10, 25, 50].includes(Number(saved))) {
@@ -579,10 +577,6 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
   };
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(getStoredItemsPerPage);
-
-  useEffect(() => {
-    localStorage.setItem("fieldsItemsPerPage", itemsPerPage);
-  }, [itemsPerPage]);
 
   const isAdmin = user.role === "Admin";
   const isAgent = user.role === "Field Agent";
@@ -608,7 +602,29 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
     };
   }, []);
 
-  // SSE: listen for real-time events
+  // Data loading helpers (defined before the useEffect that uses them)
+  const getEndpoint = useCallback(() => {
+    if (isAdmin) return "/api/admin/fields";
+    if (isAgent) return "/api/agent/fields";
+    return "/api/customer/fields";
+  }, [isAdmin, isAgent]);
+
+  const refreshFields = useCallback(() => {
+    return api.get(getEndpoint()).then((r) => setFields(r.data));
+  }, [getEndpoint]);
+
+  const refreshUsers = useCallback(() => {
+    return api.get("/api/admin/users").then((r) => setUsers(r.data));
+  }, []);
+
+  const refreshDropdowns = useCallback(() => {
+    return Promise.all([
+      api.get("/api/customers").then((r) => setCustomers(r.data)),
+      api.get("/api/agents").then((r) => setAgents(r.data)),
+    ]);
+  }, []);
+
+  // SSE: listen for real-time events (depends on refresh functions)
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) return;
@@ -639,48 +655,18 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
     es.onerror = () => {};
 
     return () => es.close();
-  }, [user.id, user.role]);
+  }, [isAdmin, onUpdateUser, refreshFields, refreshUsers, refreshDropdowns]);
 
-  // Data loading
-  const getEndpoint = () =>
-    isAdmin
-      ? "/api/admin/fields"
-      : isAgent
-        ? "/api/agent/fields"
-        : "/api/customer/fields";
-
-  const refreshFields = () =>
-    api.get(getEndpoint()).then((r) => setFields(r.data));
-  const refreshUsers = () =>
-    api.get("/api/admin/users").then((r) => setUsers(r.data));
-  const refreshDropdowns = () =>
-    Promise.all([
-      api.get("/api/customers").then((r) => setCustomers(r.data)),
-      api.get("/api/agents").then((r) => setAgents(r.data)),
-    ]);
-
+  // Initial data load
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     const calls = [
-      api.get(getEndpoint()).then((r) => {
-        if (!cancelled) setFields(r.data);
-      }),
-      api.get("/api/customers").then((r) => {
-        if (!cancelled) setCustomers(r.data);
-      }),
+      refreshFields().catch(() => {}),
+      refreshDropdowns().catch(() => {}),
     ];
     if (isAdmin) {
-      calls.push(
-        api.get("/api/admin/users").then((r) => {
-          if (!cancelled) setUsers(r.data);
-        }),
-      );
-      calls.push(
-        api.get("/api/agents").then((r) => {
-          if (!cancelled) setAgents(r.data);
-        }),
-      );
+      calls.push(refreshUsers().catch(() => {}));
     }
     Promise.all(calls)
       .catch(() => {
@@ -692,7 +678,7 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
     return () => {
       cancelled = true;
     };
-  }, [user.role]);
+  }, [isAdmin, refreshFields, refreshUsers, refreshDropdowns]);
 
   const handleLogout = () => {
     localStorage.removeItem("token");
@@ -733,13 +719,11 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
       await api.delete(`/api/admin/users/${id}`);
       await Promise.all([refreshUsers(), refreshDropdowns(), refreshFields()]);
       setConfirmDelete(null);
-      setError(""); // clear any previous error
+      setError("");
     } catch (err) {
-      const msg =
-        err.response?.data?.error ||
-        "Failed to delete user. They may have existing field updates.";
+      const msg = err.response?.data?.error || "Failed to delete user.";
       setError(msg);
-      setConfirmDelete(null); // close confirm modal
+      setConfirmDelete(null);
     }
   };
 
@@ -865,16 +849,15 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
   const tdCls =
     "px-4 py-3 align-middle border-r border-orange-200 dark:border-orange-900/50 last:border-r-0 font-semibold";
 
-  // Handle row click – edit for agents/admins, view-only for customers
   const handleRowClick = (field) => {
     if (isAdmin || isAgent) {
-      setFieldModal({ field }); // opens edit modal
+      setFieldModal({ field });
     } else if (isCustomer) {
-      setViewField(field); // opens view-only modal
+      setViewField(field);
     }
   };
 
-  if (loading)
+  if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 transition-colors">
         <div className="flex flex-col items-center gap-3">
@@ -883,6 +866,7 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
         </div>
       </div>
     );
+  }
 
   return (
     <div className="min-h-screen w-full bg-gray-50 dark:bg-gray-950 transition-colors duration-200">
@@ -918,7 +902,6 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
         />
       )}
 
-      {/* Header - full width */}
       <header className="bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800 sticky top-0 z-10">
         <div className="w-full px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3 sm:gap-5 flex-1 min-w-0">
@@ -994,7 +977,6 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
         </div>
       </header>
 
-      {/* Main content */}
       <main className="w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {error && (
           <div className="mb-6 p-3.5 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800/50 rounded-xl flex items-center gap-2">
@@ -1035,7 +1017,6 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
           </div>
         )}
 
-        {/* Fields tab */}
         {tab === "fields" && (
           <>
             <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
@@ -1094,7 +1075,6 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
               </div>
             </div>
 
-            {/* Search + Filters */}
             <div className="flex flex-wrap items-center gap-2 mb-6">
               <div className="relative flex-1 min-w-[200px]">
                 <svg
@@ -1198,7 +1178,6 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
               )}
             </div>
 
-            {/* Stats */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
               {stats.map((s) => {
                 const isActive = statusFilter === s.clickFilter;
@@ -1228,7 +1207,6 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
               })}
             </div>
 
-            {/* Pagination (above table) */}
             {filteredFields.length > 0 && (
               <Pagination
                 currentPage={currentPage}
@@ -1242,7 +1220,6 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
               />
             )}
 
-            {/* Fields table - responsive sticky columns & clickable rows */}
             <div className="bg-white dark:bg-gray-900 rounded-2xl border border-orange-200 dark:border-orange-900/50 overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm border-collapse min-w-[800px]">
@@ -1420,7 +1397,6 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
           </>
         )}
 
-        {/* Users tab (unchanged) */}
         {tab === "users" && isAdmin && (
           <>
             <div className="mb-6">

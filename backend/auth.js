@@ -1,4 +1,4 @@
-// auth.js - simple local auth, replace with OpenAuth for production
+// JWT Authentication
 const jwt = require("jsonwebtoken");
 
 const requireAuth = (req, res, next) => {
