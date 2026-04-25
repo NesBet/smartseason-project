@@ -11,8 +11,7 @@ Whether you're a **Customer** monitoring your fields, a **Field Agent** updating
 - Database: PostgreSQL is used as the primary datastore.
 - Public exposure: hosting is done via Tailscale Funnel.
 
-You can access the live version by clicking this link:
-```bash https://bit.ly/42sQ4EN ```
+You can access the live version by clicking [here(https://bit.ly/42sQ4EN)].
 
 ## ✨ Key Features
 
