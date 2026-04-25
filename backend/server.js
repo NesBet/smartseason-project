@@ -1,3 +1,4 @@
+// Backend Server
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
@@ -381,12 +382,10 @@ app.delete(
     } catch (err) {
       await pool.query("ROLLBACK");
       console.error("Delete user error:", err);
-      res
-        .status(500)
-        .json({
-          error:
-            "Cannot delete user because they have related records. Please remove them from all fields and updates first, or contact support.",
-        });
+      res.status(500).json({
+        error:
+          "Cannot delete user because they have related records. Please remove them from all fields and updates first, or contact support.",
+      });
     }
   },
 );
