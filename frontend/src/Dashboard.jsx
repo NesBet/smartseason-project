@@ -1,4 +1,3 @@
-// Dashboard.jsx – sticky columns only on large screens, clickable rows with role‑based actions
 import { useState, useEffect, useRef } from "react";
 import api from "./api";
 import ThemeToggle from "./ThemeToggle";
@@ -730,9 +729,18 @@ export default function Dashboard({ user, onLogout, onUpdateUser = () => {} }) {
     await Promise.all([refreshUsers(), refreshDropdowns()]);
   };
   const handleDeleteUser = async (id) => {
-    await api.delete(`/api/admin/users/${id}`);
-    await Promise.all([refreshUsers(), refreshDropdowns(), refreshFields()]);
-    setConfirmDelete(null);
+    try {
+      await api.delete(`/api/admin/users/${id}`);
+      await Promise.all([refreshUsers(), refreshDropdowns(), refreshFields()]);
+      setConfirmDelete(null);
+      setError(""); // clear any previous error
+    } catch (err) {
+      const msg =
+        err.response?.data?.error ||
+        "Failed to delete user. They may have existing field updates.";
+      setError(msg);
+      setConfirmDelete(null); // close confirm modal
+    }
   };
 
   const agentEmails = [

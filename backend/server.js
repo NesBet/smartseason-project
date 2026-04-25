@@ -336,41 +336,57 @@ app.delete(
   requireRole("Admin"),
   async (req, res) => {
     try {
-      if (parseInt(req.params.id) === req.user.id)
+      const userId = parseInt(req.params.id);
+      if (userId === req.user.id) {
         return res
           .status(400)
           .json({ error: "You cannot delete your own account." });
+      }
 
-      // Get user info before deleting
-      const userToDelete = await pool.query(
+      const userResult = await pool.query(
         "SELECT role FROM users WHERE id = $1",
-        [req.params.id],
+        [userId],
       );
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({ error: "User not found." });
+      }
+      const userRole = userResult.rows[0].role;
 
-      // Unassign fields owned by this user
-      if (userToDelete.rows[0]?.role === "Field Agent") {
+      await pool.query("BEGIN");
+
+      if (userRole === "Field Agent") {
         await pool.query(
           "UPDATE fields SET agent_id = NULL WHERE agent_id = $1",
-          [req.params.id],
+          [userId],
         );
-      }
-      if (userToDelete.rows[0]?.role === "Customer") {
+        await pool.query(
+          "UPDATE field_updates SET agent_id = NULL WHERE agent_id = $1",
+          [userId],
+        );
+      } else if (userRole === "Customer") {
         await pool.query(
           "UPDATE fields SET customer_id = NULL WHERE customer_id = $1",
-          [req.params.id],
+          [userId],
         );
       }
 
-      await pool.query("DELETE FROM users WHERE id=$1", [req.params.id]);
+      await pool.query("DELETE FROM users WHERE id = $1", [userId]);
+      await pool.query("COMMIT");
 
-      // Notify admins to refresh
       await sseSendToAdmins("refresh-users", {});
       await sseSendToAdmins("refresh-fields", {});
       await sseSendToAdmins("refresh-dropdowns", {});
 
-      res.json({ message: "User deleted." });
+      res.json({ message: "User deleted successfully." });
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      await pool.query("ROLLBACK");
+      console.error("Delete user error:", err);
+      res
+        .status(500)
+        .json({
+          error:
+            "Cannot delete user because they have related records. Please remove them from all fields and updates first, or contact support.",
+        });
     }
   },
 );
